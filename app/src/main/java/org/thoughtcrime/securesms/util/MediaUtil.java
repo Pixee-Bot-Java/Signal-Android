@@ -153,7 +153,7 @@ public class MediaUtil {
     if (fileExtension == null) {
       return mimeType;
     }
-    if (fileExtension.toLowerCase().equals("m4a")) {
+    if ("m4a".equals(fileExtension.toLowerCase())) {
       return safeMimeTypeOverride(mimeType, AUDIO_MP4);
     }
     return mimeType;
@@ -258,7 +258,7 @@ public class MediaUtil {
   }
 
   public static boolean isMms(String contentType) {
-    return !TextUtils.isEmpty(contentType) && contentType.trim().equals("application/mms");
+    return !TextUtils.isEmpty(contentType) && "application/mms".equals(contentType.trim());
   }
 
   public static boolean isGif(Attachment attachment) {
@@ -298,7 +298,7 @@ public class MediaUtil {
   }
 
   public static boolean isGif(String contentType) {
-    return !TextUtils.isEmpty(contentType) && contentType.trim().equals("image/gif");
+    return !TextUtils.isEmpty(contentType) && "image/gif".equals(contentType.trim());
   }
 
   public static boolean isJpegType(String contentType) {

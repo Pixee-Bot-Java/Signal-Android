@@ -106,7 +106,7 @@ public class PassphraseChangeActivity extends PassphraseActivity {
       this.repeatPassphrase.setText("");
       this.newPassphrase.setError(getString(R.string.PassphraseChangeActivity_passphrases_dont_match_exclamation));
       this.newPassphrase.requestFocus();
-    } else if (passphrase.equals("")) {
+    } else if ("".equals(passphrase)) {
       this.newPassphrase.setError(getString(R.string.PassphraseChangeActivity_enter_new_passphrase_exclamation));
       this.newPassphrase.requestFocus();
     } else {

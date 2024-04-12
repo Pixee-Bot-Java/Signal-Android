@@ -143,7 +143,7 @@ public final class EmojiSearchIndexDownloadJob extends BaseJob {
         if (locale.getVariant().equals(testLocale.getVariant())) {
           Log.d(TAG, "Found an exact match: " + language);
           return language;
-        } else if (locale.getVariant().equals("")) {
+        } else if ("".equals(locale.getVariant())) {
           Log.d(TAG, "Found the parent language: " + language);
           parentLanguage = language;
         }

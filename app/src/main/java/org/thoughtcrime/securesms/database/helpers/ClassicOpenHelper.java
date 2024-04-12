@@ -816,7 +816,7 @@ public class ClassicOpenHelper extends SQLiteOpenHelper {
           if (resolved != null && resolved.moveToFirst()) {
             String address = resolved.getString(0);
             addresses[i] = DelimiterUtil.escape(numberMigrator.migrate(address), ' ');
-          } else if (TextUtils.isEmpty(recipientIds[i]) || recipientIds[i].equals("-1")) {
+          } else if (TextUtils.isEmpty(recipientIds[i]) || "-1".equals(recipientIds[i])) {
             addresses[i] = "Unknown";
           } else {
             throw new AssertionError("Unable to resolve: " + recipientIds[i] + ", recipientIdsList: '" + recipientIdsList + "'");
@@ -889,7 +889,7 @@ public class ClassicOpenHelper extends SQLiteOpenHelper {
           if (resolved != null && resolved.moveToFirst()) {
             String address = resolved.getString(0);
             addresses[i] = DelimiterUtil.escape(numberMigrator.migrate(address), ' ');
-          } else if (TextUtils.isEmpty(recipientIds[i]) || recipientIds[i].equals("-1")) {
+          } else if (TextUtils.isEmpty(recipientIds[i]) || "-1".equals(recipientIds[i])) {
             addresses[i] = "Unknown";
           } else {
             throw new AssertionError("Unable to resolve: " + recipientIds[i] + ", recipientIdsList: '" + recipientIdsList + "'");
