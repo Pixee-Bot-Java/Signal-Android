@@ -27,7 +27,7 @@ public class LogStyleParser {
   }
 
   public static @NonNull LogLine.Placeholder parsePlaceholderType(@NonNull String text) {
-    if (text.equals(TRACE_PLACEHOLDER)) {
+    if (TRACE_PLACEHOLDER.equals(text)) {
       return LogLine.Placeholder.TRACE;
     } else {
       return LogLine.Placeholder.NONE;

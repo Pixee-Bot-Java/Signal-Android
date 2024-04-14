@@ -859,9 +859,9 @@ public final class FeatureFlags {
       return (boolean) remote;
     } else if (remote instanceof String) {
       String stringValue = ((String) remote).toLowerCase();
-      if (stringValue.equals("true")) {
+      if ("true".equals(stringValue)) {
         return true;
-      } else if (stringValue.equals("false")) {
+      } else if ("false".equals(stringValue)) {
         return false;
       } else {
         Log.w(TAG, "Expected a boolean for key '" + key + "', but got something else (" + stringValue + ")! Falling back to the default.");

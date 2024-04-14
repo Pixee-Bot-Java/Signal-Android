@@ -17,7 +17,7 @@ public final class GroupLinkNotActiveException extends Exception {
   public GroupLinkNotActiveException(Throwable t, Optional<String> reason) {
     super(t);
 
-    if (reason.isPresent() && reason.get().equalsIgnoreCase("banned")) {
+    if (reason.isPresent() && "banned".equalsIgnoreCase(reason.get())) {
       this.reason = Reason.BANNED;
     } else {
       this.reason = Reason.UNKNOWN;

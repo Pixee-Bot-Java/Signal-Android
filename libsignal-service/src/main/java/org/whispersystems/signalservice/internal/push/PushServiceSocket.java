@@ -1657,7 +1657,7 @@ public class PushServiceSocket {
                                                    .post(RequestBody.create(null, ""));
 
     for (Map.Entry<String, String> header : headers.entrySet()) {
-      if (!header.getKey().equalsIgnoreCase("host")) {
+      if (!"host".equalsIgnoreCase(header.getKey())) {
         request.header(header.getKey(), header.getValue());
       }
     }

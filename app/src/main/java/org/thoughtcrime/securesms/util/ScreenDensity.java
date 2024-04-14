@@ -68,7 +68,7 @@ public final class ScreenDensity {
   }
 
   public boolean isKnownDensity() {
-    return !bucket.equals(UNKNOWN);
+    return !UNKNOWN.equals(bucket);
   }
 
   @Override

@@ -163,7 +163,7 @@ public class CreatePaymentViewModel extends ViewModel {
     Money     newMoney      = inputState.getExchangeRate().flatMap(e -> e.exchange(newFiat)).get();
     String    newMoneyAmount;
 
-    if (newFiatAmount.equals("0")) {
+    if ("0".equals(newFiatAmount)) {
       newMoneyAmount = "0";
     } else {
       newMoneyAmount = newMoney.toString(FormatterOptions.builder().withoutUnit().build());
@@ -189,7 +189,7 @@ public class CreatePaymentViewModel extends ViewModel {
       return inputState;
     }
 
-    if (newMoneyAmount.equals("0")) {
+    if ("0".equals(newMoneyAmount)) {
       newFiatAmount = "0";
     } else {
       newFiatAmount = newFiat.map(f -> FiatMoneyUtil.format(context.getResources(), f, FiatMoneyUtil.formatOptions().withDisplayTime(false).numberOnly())).orElse("0");

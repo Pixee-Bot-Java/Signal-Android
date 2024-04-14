@@ -51,7 +51,7 @@ public class XmlBackup {
 
       String name = parser.getName();
 
-      if (!name.equalsIgnoreCase("sms")) {
+      if (!"sms".equalsIgnoreCase(name)) {
         continue;
       }
 
@@ -66,17 +66,17 @@ public class XmlBackup {
       for (int i=0;i<attributeCount;i++) {
         String attributeName = parser.getAttributeName(i);
 
-        if      (attributeName.equals(PROTOCOL      )) item.protocol      = Integer.parseInt(parser.getAttributeValue(i));
-        else if (attributeName.equals(ADDRESS       )) item.address       = parser.getAttributeValue(i);
-        else if (attributeName.equals(CONTACT_NAME  )) item.contactName   = parser.getAttributeValue(i);
-        else if (attributeName.equals(DATE          )) item.date          = Long.parseLong(parser.getAttributeValue(i));
-        else if (attributeName.equals(READABLE_DATE )) item.readableDate  = parser.getAttributeValue(i);
-        else if (attributeName.equals(TYPE          )) item.type          = Integer.parseInt(parser.getAttributeValue(i));
-        else if (attributeName.equals(SUBJECT       )) item.subject       = parser.getAttributeValue(i);
-        else if (attributeName.equals(BODY          )) item.body          = parser.getAttributeValue(i);
-        else if (attributeName.equals(SERVICE_CENTER)) item.serviceCenter = parser.getAttributeValue(i);
-        else if (attributeName.equals(READ          )) item.read          = Integer.parseInt(parser.getAttributeValue(i));
-        else if (attributeName.equals(STATUS        )) item.status        = Integer.parseInt(parser.getAttributeValue(i));
+        if      (PROTOCOL.equals(attributeName      )) item.protocol      = Integer.parseInt(parser.getAttributeValue(i));
+        else if (ADDRESS.equals(attributeName       )) item.address       = parser.getAttributeValue(i);
+        else if (CONTACT_NAME.equals(attributeName  )) item.contactName   = parser.getAttributeValue(i);
+        else if (DATE.equals(attributeName          )) item.date          = Long.parseLong(parser.getAttributeValue(i));
+        else if (READABLE_DATE.equals(attributeName )) item.readableDate  = parser.getAttributeValue(i);
+        else if (TYPE.equals(attributeName          )) item.type          = Integer.parseInt(parser.getAttributeValue(i));
+        else if (SUBJECT.equals(attributeName       )) item.subject       = parser.getAttributeValue(i);
+        else if (BODY.equals(attributeName          )) item.body          = parser.getAttributeValue(i);
+        else if (SERVICE_CENTER.equals(attributeName)) item.serviceCenter = parser.getAttributeValue(i);
+        else if (READ.equals(attributeName          )) item.read          = Integer.parseInt(parser.getAttributeValue(i));
+        else if (STATUS.equals(attributeName        )) item.status        = Integer.parseInt(parser.getAttributeValue(i));
       }
 
       return item;

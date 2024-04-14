@@ -71,7 +71,7 @@ public final class TranslationDetection {
     if (Build.VERSION.SDK_INT >= 24) {
       Locale firstMatch = configurationLocal.getLocales().getFirstMatch(new String[]{"en"});
 
-      return firstMatch != null && firstMatch.getLanguage().equals("en");
+      return firstMatch != null && "en".equals(firstMatch.getLanguage());
     }
 
     return false;
