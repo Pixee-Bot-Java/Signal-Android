@@ -13,6 +13,8 @@ import android.os.Build
 import android.text.SpannableStringBuilder
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.bumptech.glide.Glide
+import com.bumptech.glide.RequestManager
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
@@ -75,8 +77,6 @@ import org.thoughtcrime.securesms.keyboard.KeyboardUtil
 import org.thoughtcrime.securesms.keyvalue.SignalStore
 import org.thoughtcrime.securesms.linkpreview.LinkPreview
 import org.thoughtcrime.securesms.messagerequests.MessageRequestState
-import org.thoughtcrime.securesms.mms.GlideApp
-import org.thoughtcrime.securesms.mms.GlideRequests
 import org.thoughtcrime.securesms.mms.OutgoingMessage
 import org.thoughtcrime.securesms.mms.PartAuthority
 import org.thoughtcrime.securesms.mms.QuoteModel
@@ -86,7 +86,6 @@ import org.thoughtcrime.securesms.profiles.spoofing.ReviewUtil
 import org.thoughtcrime.securesms.providers.BlobProvider
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.recipients.RecipientId
-import org.thoughtcrime.securesms.search.MessageResult
 import org.thoughtcrime.securesms.sms.MessageSender
 import org.thoughtcrime.securesms.sms.MessageSender.PreUploadResult
 import org.thoughtcrime.securesms.util.BitmapUtil
@@ -123,7 +122,7 @@ class ConversationRepository(
    */
   fun getKeyboardImageDetails(uri: Uri): Maybe<KeyboardUtil.ImageDetails> {
     return MaybeCompat.fromCallable {
-      KeyboardUtil.getImageDetails(GlideApp.with(applicationContext), uri)
+      KeyboardUtil.getImageDetails(Glide.with(applicationContext), uri)
     }.subscribeOn(Schedulers.io())
   }
 
@@ -265,9 +264,9 @@ class ConversationRepository(
     }.subscribeOn(Schedulers.io())
   }
 
-  fun getMessageResultPosition(threadId: Long, messageResult: MessageResult): Single<Int> {
+  fun getMessageResultPosition(threadId: Long, receivedTimestamp: Long): Single<Int> {
     return Single.fromCallable {
-      SignalDatabase.messages.getMessagePositionInConversation(threadId, messageResult.receivedTimestampMs)
+      SignalDatabase.messages.getMessagePositionInConversation(threadId, receivedTimestamp)
     }.subscribeOn(Schedulers.io())
   }
 
@@ -366,12 +365,20 @@ class ConversationRepository(
 
   fun getRequestReviewState(recipient: Recipient, group: GroupRecord?, messageRequest: MessageRequestState): Single<RequestReviewState> {
     return Single.fromCallable {
-      if (group == null && messageRequest != MessageRequestState.INDIVIDUAL) {
+      if (group == null && messageRequest.state != MessageRequestState.State.INDIVIDUAL) {
         return@fromCallable RequestReviewState()
       }
 
-      if (group == null && ReviewUtil.isRecipientReviewSuggested(recipient.id)) {
-        return@fromCallable RequestReviewState(individualReviewState = IndividualReviewState(recipient))
+      if (group == null) {
+        val recipientsToReview = ReviewUtil.getRecipientsToPromptForReview(recipient.id)
+        if (recipientsToReview.size > 0) {
+          return@fromCallable RequestReviewState(
+            individualReviewState = IndividualReviewState(
+              target = recipient,
+              firstDuplicate = Recipient.resolvedList(recipientsToReview)[0]
+            )
+          )
+        }
       }
 
       if (group != null && group.isV2Group) {
@@ -383,6 +390,7 @@ class ConversationRepository(
             groupReviewState = GroupReviewState(
               groupId,
               duplicateRecipients[0],
+              duplicateRecipients[1],
               duplicateRecipients.size
             )
           )
@@ -474,12 +482,12 @@ class ConversationRepository(
       .joinTo(buffer = SpannableStringBuilder(), separator = "\n")
   }
 
-  fun getRecipientContactPhotoBitmap(context: Context, glideRequests: GlideRequests, recipient: Recipient): Single<ShortcutInfoCompat> {
+  fun getRecipientContactPhotoBitmap(context: Context, requestManager: RequestManager, recipient: Recipient): Single<ShortcutInfoCompat> {
     val fallback = recipient.fallbackContactPhoto.asDrawable(context, recipient.avatarColor, false)
 
     return Single
       .create { emitter ->
-        glideRequests
+        requestManager
           .asBitmap()
           .load(recipient.contactPhoto)
           .error(fallback)
@@ -569,6 +577,12 @@ class ConversationRepository(
     SignalExecutors.BOUNDED_IO.execute {
       SignalDatabase.threads.setLastSeen(threadId)
     }
+  }
+
+  fun getEarliestMessageDate(threadId: Long): Single<Long> {
+    return Single
+      .fromCallable { SignalDatabase.messages.getEarliestMessageDate(threadId) }
+      .subscribeOn(Schedulers.io())
   }
 
   /**

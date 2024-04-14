@@ -7,7 +7,7 @@ import org.thoughtcrime.securesms.components.webrtc.BroadcastVideoSink
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.ringrtc.CameraState
 
-data class CallParticipant constructor(
+data class CallParticipant(
   val callParticipantId: CallParticipantId = CallParticipantId(Recipient.UNKNOWN),
   val recipient: Recipient = Recipient.UNKNOWN,
   val identityKey: IdentityKey? = null,
@@ -77,6 +77,10 @@ data class CallParticipant constructor(
 
   fun withHandRaisedTimestamp(timestamp: Long): CallParticipant {
     return copy(handRaisedTimestamp = timestamp)
+  }
+
+  override fun toString(): String {
+    return "CallParticipant(callParticipantId=$callParticipantId, isForwardingVideo=$isForwardingVideo, isVideoEnabled=$isVideoEnabled, isMicrophoneEnabled=$isMicrophoneEnabled, handRaisedTimestamp=$handRaisedTimestamp, isMediaKeysReceived=$isMediaKeysReceived, isScreenSharing=$isScreenSharing)"
   }
 
   enum class DeviceOrdinal {

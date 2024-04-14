@@ -35,6 +35,39 @@ fun SupportSQLiteDatabase.getTableRowCount(table: String): Int {
   }
 }
 
+fun SupportSQLiteDatabase.getAllTables(): List<String> {
+  return SqlUtil.getAllTables(this)
+}
+
+/**
+ * Returns a list of objects that represent the table definitions in the database. Basically the table name and then the SQL that was used to create it.
+ */
+fun SupportSQLiteDatabase.getAllTableDefinitions(): List<CreateStatement> {
+  return this.query("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND sql NOT NULL AND name != 'sqlite_sequence'")
+    .readToList { cursor ->
+      CreateStatement(
+        name = cursor.requireNonNullString("name"),
+        statement = cursor.requireNonNullString("sql").replace("      ", "")
+      )
+    }
+    .filterNot { it.name.startsWith("sqlite_stat") }
+    .sortedBy { it.name }
+}
+
+/**
+ * Returns a list of objects that represent the index definitions in the database. Basically the index name and then the SQL that was used to create it.
+ */
+fun SupportSQLiteDatabase.getAllIndexDefinitions(): List<CreateStatement> {
+  return this.query("SELECT name, sql FROM sqlite_schema WHERE type = 'index' AND sql NOT NULL")
+    .readToList { cursor ->
+      CreateStatement(
+        name = cursor.requireNonNullString("name"),
+        statement = cursor.requireNonNullString("sql")
+      )
+    }
+    .sortedBy { it.name }
+}
+
 fun SupportSQLiteDatabase.getForeignKeys(): List<ForeignKeyConstraint> {
   return SqlUtil.getAllTables(this)
     .map { table ->
@@ -92,16 +125,29 @@ fun SupportSQLiteDatabase.count(): SelectBuilderPart1 {
 
 /**
  * Begins an UPDATE statement with a helpful builder pattern.
+ * Requires a WHERE clause as a way of mitigating mistakes. If you'd like to update all items in the table, use [updateAll].
  */
 fun SupportSQLiteDatabase.update(tableName: String): UpdateBuilderPart1 {
   return UpdateBuilderPart1(this, tableName)
 }
 
+fun SupportSQLiteDatabase.updateAll(tableName: String): UpdateAllBuilderPart1 {
+  return UpdateAllBuilderPart1(this, tableName)
+}
+
 /**
  * Begins a DELETE statement with a helpful builder pattern.
+ * Requires a WHERE clause as a way of mitigating mistakes. If you'd like to delete all items in the table, use [deleteAll].
  */
 fun SupportSQLiteDatabase.delete(tableName: String): DeleteBuilderPart1 {
   return DeleteBuilderPart1(this, tableName)
+}
+
+/**
+ * Deletes all data in the table.
+ */
+fun SupportSQLiteDatabase.deleteAll(tableName: String): Int {
+  return this.delete(tableName, null, null)
 }
 
 fun SupportSQLiteDatabase.insertInto(tableName: String): InsertBuilderPart1 {
@@ -271,15 +317,13 @@ class UpdateBuilderPart2(
   private val values: ContentValues
 ) {
   fun where(@Language("sql") where: String, vararg whereArgs: Any): UpdateBuilderPart3 {
+    require(where.isNotBlank())
     return UpdateBuilderPart3(db, tableName, values, where, SqlUtil.buildArgs(*whereArgs))
   }
 
   fun where(@Language("sql") where: String, whereArgs: Array<String>): UpdateBuilderPart3 {
+    require(where.isNotBlank())
     return UpdateBuilderPart3(db, tableName, values, where, whereArgs)
-  }
-
-  fun run(conflictStrategy: Int = SQLiteDatabase.CONFLICT_NONE): Int {
-    return db.update(tableName, conflictStrategy, values, null, arrayOf<String>())
   }
 }
 
@@ -296,20 +340,42 @@ class UpdateBuilderPart3(
   }
 }
 
+class UpdateAllBuilderPart1(
+  private val db: SupportSQLiteDatabase,
+  private val tableName: String
+) {
+  fun values(values: ContentValues): UpdateAllBuilderPart2 {
+    return UpdateAllBuilderPart2(db, tableName, values)
+  }
+
+  fun values(vararg values: Pair<String, Any?>): UpdateAllBuilderPart2 {
+    return UpdateAllBuilderPart2(db, tableName, contentValuesOf(*values))
+  }
+}
+
+class UpdateAllBuilderPart2(
+  private val db: SupportSQLiteDatabase,
+  private val tableName: String,
+  private val values: ContentValues
+) {
+  @JvmOverloads
+  fun run(conflictStrategy: Int = SQLiteDatabase.CONFLICT_NONE): Int {
+    return db.update(tableName, conflictStrategy, values, null, emptyArray<String>())
+  }
+}
+
 class DeleteBuilderPart1(
   private val db: SupportSQLiteDatabase,
   private val tableName: String
 ) {
   fun where(@Language("sql") where: String, vararg whereArgs: Any): DeleteBuilderPart2 {
+    require(where.isNotBlank())
     return DeleteBuilderPart2(db, tableName, where, SqlUtil.buildArgs(*whereArgs))
   }
 
   fun where(@Language("sql") where: String, whereArgs: Array<String>): DeleteBuilderPart2 {
+    require(where.isNotBlank())
     return DeleteBuilderPart2(db, tableName, where, whereArgs)
-  }
-
-  fun run(): Int {
-    return db.delete(tableName, null, emptyArray<String>())
   }
 }
 
@@ -392,4 +458,9 @@ data class Index(
   val name: String,
   val table: String,
   val columns: List<String>
+)
+
+data class CreateStatement(
+  val name: String,
+  val statement: String
 )

@@ -1,9 +1,11 @@
 package org.thoughtcrime.securesms.database;
 
 import android.content.Context;
+import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 
 import org.signal.core.util.logging.Log;
@@ -19,6 +21,7 @@ import org.thoughtcrime.securesms.mms.StickerSlide;
 import org.thoughtcrime.securesms.util.MessageRecordUtil;
 import org.thoughtcrime.securesms.util.Util;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -32,34 +35,38 @@ public final class ThreadBodyUtil {
 
   public static @NonNull ThreadBody getFormattedBodyFor(@NonNull Context context, @NonNull MessageRecord record) {
     if (record.isMms()) {
-      return getFormattedBodyForMms(context, (MmsMessageRecord) record);
+      return getFormattedBodyForMms(context, (MmsMessageRecord) record, null);
     }
 
     return new ThreadBody(record.getBody());
   }
 
-  private static @NonNull ThreadBody getFormattedBodyForMms(@NonNull Context context, @NonNull MmsMessageRecord record) {
+  public static @NonNull CharSequence getFormattedBodyForNotification(@NonNull Context context, @NonNull MessageRecord record, @Nullable CharSequence bodyOverride) {
+    return getFormattedBodyForMms(context, (MmsMessageRecord) record, bodyOverride).body;
+  }
+
+  private static @NonNull ThreadBody getFormattedBodyForMms(@NonNull Context context, @NonNull MmsMessageRecord record, @Nullable CharSequence bodyOverride) {
     if (record.getSharedContacts().size() > 0) {
       Contact contact = record.getSharedContacts().get(0);
 
       return new ThreadBody(ContactUtil.getStringSummary(context, contact).toString());
     } else if (record.getSlideDeck().getDocumentSlide() != null) {
-      return format(context, record, EmojiStrings.FILE, R.string.ThreadRecord_file);
+      return format(context, record, EmojiStrings.FILE, R.string.ThreadRecord_file, bodyOverride);
     } else if (record.getSlideDeck().getAudioSlide() != null) {
-      return format(context, record, EmojiStrings.AUDIO, R.string.ThreadRecord_voice_message);
+      return format(context, record, EmojiStrings.AUDIO, R.string.ThreadRecord_voice_message, bodyOverride);
     } else if (MessageRecordUtil.hasSticker(record)) {
       String emoji = getStickerEmoji(record);
-      return format(context, record, emoji, R.string.ThreadRecord_sticker);
+      return format(context, record, emoji, R.string.ThreadRecord_sticker, bodyOverride);
     } else if (MessageRecordUtil.hasGiftBadge(record)) {
-      return format(EmojiStrings.GIFT, getGiftSummary(context, record));
+      return format(EmojiStrings.GIFT, getGiftSummary(context, record), null);
     } else if (MessageRecordUtil.isStoryReaction(record)) {
       return new ThreadBody(getStoryReactionSummary(context, record));
     } else if (record.isPaymentNotification()) {
-      return format(EmojiStrings.CARD, context.getString(R.string.ThreadRecord_payment));
+      return format(EmojiStrings.CARD, context.getString(R.string.ThreadRecord_payment), null);
     } else if (record.isPaymentsRequestToActivate()) {
-      return format(EmojiStrings.CARD, getPaymentActivationRequestSummary(context, record));
+      return format(EmojiStrings.CARD, getPaymentActivationRequestSummary(context, record), null);
     } else if (record.isPaymentsActivated()) {
-      return format(EmojiStrings.CARD, getPaymentActivatedSummary(context, record));
+      return format(EmojiStrings.CARD, getPaymentActivatedSummary(context, record), null);
     } else if (record.isCallLog() && !record.isGroupCall()) {
       return new ThreadBody(getCallLogSummary(context, record));
     } else if (MessageRecordUtil.isScheduled(record)) {
@@ -77,11 +84,11 @@ public final class ThreadBodyUtil {
     }
 
     if (hasGif) {
-      return format(context, record, EmojiStrings.GIF, R.string.ThreadRecord_gif);
+      return format(context, record, EmojiStrings.GIF, R.string.ThreadRecord_gif, bodyOverride);
     } else if (hasVideo) {
-      return format(context, record, EmojiStrings.VIDEO, R.string.ThreadRecord_video);
+      return format(context, record, EmojiStrings.VIDEO, R.string.ThreadRecord_video, bodyOverride);
     } else if (hasImage) {
-      return format(context, record, EmojiStrings.PHOTO, R.string.ThreadRecord_photo);
+      return format(context, record, EmojiStrings.PHOTO, R.string.ThreadRecord_photo, bodyOverride);
     } else if (TextUtils.isEmpty(record.getBody())) {
       return new ThreadBody(context.getString(R.string.ThreadRecord_media_message));
     } else {
@@ -153,18 +160,35 @@ public final class ThreadBodyUtil {
       return "";
     }
   }
-  
-  private static @NonNull ThreadBody format(@NonNull Context context, @NonNull MessageRecord record, @NonNull String emoji, @StringRes int defaultStringRes) {
-    CharSequence body = getBodyOrDefault(context, record, defaultStringRes).getBody();
-    return format(emoji, body);
+
+  private static @NonNull ThreadBody format(@NonNull Context context,
+                                            @NonNull MessageRecord record,
+                                            @NonNull String emoji,
+                                            @StringRes int defaultStringRes,
+                                            @Nullable CharSequence bodyOverride)
+  {
+    CharSequence body;
+    List<BodyAdjustment> adjustments = null;
+
+    if (!TextUtils.isEmpty(bodyOverride)) {
+      body = bodyOverride;
+    } else if (TextUtils.isEmpty(record.getBody())) {
+      body = context.getString(defaultStringRes);
+    } else {
+      ThreadBody threadBody = getBody(context, record);
+      body = threadBody.getBody();
+      adjustments = threadBody.getBodyAdjustments();
+    }
+
+    return format(emoji, body, adjustments);
   }
 
-  private static @NonNull ThreadBody format(@NonNull CharSequence prefix, @NonNull CharSequence body) {
-    return new ThreadBody(String.format("%s %s", prefix, body), prefix.length() + 1);
-  }
-
-  private static @NonNull ThreadBody getBodyOrDefault(@NonNull Context context, @NonNull MessageRecord record, @StringRes int defaultStringRes) {
-    return TextUtils.isEmpty(record.getBody()) ? new ThreadBody(context.getString(defaultStringRes)) : getBody(context, record);
+  private static @NonNull ThreadBody format(@NonNull CharSequence prefix, @NonNull CharSequence body, @Nullable List<BodyAdjustment> adjustments) {
+    SpannableStringBuilder builder = new SpannableStringBuilder();
+    builder.append(prefix)
+           .append(" ")
+           .append(body);
+    return new ThreadBody(builder, prefix.length() + 1, adjustments != null ? adjustments : Collections.emptyList());
   }
 
   private static @NonNull ThreadBody getBody(@NonNull Context context, @NonNull MessageRecord record) {
@@ -185,16 +209,24 @@ public final class ThreadBodyUtil {
     private final List<BodyAdjustment> bodyAdjustments;
 
     public ThreadBody(@NonNull CharSequence body) {
-      this(body, 0);
-    }
-
-    public ThreadBody(@NonNull CharSequence body, int startOffset) {
-      this(body, startOffset == 0 ? Collections.emptyList() : Collections.singletonList(new BodyAdjustment(0, 0, startOffset)));
+      this(body, 0, Collections.emptyList());
     }
 
     public ThreadBody(@NonNull CharSequence body, @NonNull List<BodyAdjustment> bodyAdjustments) {
-      this.body            = body;
-      this.bodyAdjustments = bodyAdjustments;
+      this(body, 0, bodyAdjustments);
+    }
+
+    public ThreadBody(@NonNull CharSequence body, int startOffset, @NonNull List<BodyAdjustment> bodyAdjustments) {
+      this.body = body;
+      if (startOffset == 0) {
+        this.bodyAdjustments = bodyAdjustments;
+      } else {
+        ArrayList<BodyAdjustment> updatedAdjustments = new ArrayList<>(bodyAdjustments.size() + 1);
+        updatedAdjustments.add(new BodyAdjustment(0, 0, startOffset));
+        updatedAdjustments.addAll(bodyAdjustments);
+
+        this.bodyAdjustments = updatedAdjustments;
+      }
     }
 
     public @NonNull CharSequence getBody() {

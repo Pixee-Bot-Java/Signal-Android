@@ -17,7 +17,6 @@ import androidx.lifecycle.ViewModelProvider;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import org.signal.core.util.concurrent.LifecycleDisposable;
-import org.signal.core.util.logging.Log;
 import org.signal.donations.StripeApi;
 import org.thoughtcrime.securesms.components.DebugLogsPromptDialogFragment;
 import org.thoughtcrime.securesms.components.PromptBatterySaverDialogFragment;
@@ -153,7 +152,7 @@ public class MainActivity extends PassphraseRequiredActivity implements VoiceNot
           .setMessage(R.string.OldDeviceTransferLockedDialog__your_signal_account_has_been_transferred_to_your_new_device)
           .setPositiveButton(R.string.OldDeviceTransferLockedDialog__done, (d, w) -> OldDeviceExitActivity.exit(this))
           .setNegativeButton(R.string.OldDeviceTransferLockedDialog__cancel_and_activate_this_device, (d, w) -> {
-            SignalStore.misc().clearOldDeviceTransferLocked();
+            SignalStore.misc().setOldDeviceTransferLocked(false);
             DeviceTransferBlockingInterceptor.getInstance().unblockNetwork();
           })
           .setCancelable(false)

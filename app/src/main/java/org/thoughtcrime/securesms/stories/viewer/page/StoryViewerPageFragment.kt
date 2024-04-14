@@ -28,6 +28,7 @@ import androidx.core.view.animation.PathInterpolatorCompat
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import com.bumptech.glide.Glide
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.progressindicator.CircularProgressIndicatorSpec
@@ -61,7 +62,6 @@ import org.thoughtcrime.securesms.database.model.MmsMessageRecord
 import org.thoughtcrime.securesms.database.model.databaseprotos.BodyRangeList
 import org.thoughtcrime.securesms.mediapreview.MediaPreviewFragment
 import org.thoughtcrime.securesms.mediapreview.VideoControlsDelegate
-import org.thoughtcrime.securesms.mms.GlideApp
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.recipients.RecipientId
 import org.thoughtcrime.securesms.recipients.ui.bottomsheet.RecipientBottomSheetDialogFragment
@@ -138,7 +138,7 @@ class StoryViewerPageFragment :
           storyViewStateViewModel.storyViewStateCache
         ),
         StoryCache(
-          GlideApp.with(requireActivity()),
+          Glide.with(requireActivity()),
           StoryDisplay.getStorySize(resources)
         )
       )
@@ -933,8 +933,7 @@ class StoryViewerPageFragment :
   private fun onSenderClicked(senderId: RecipientId) {
     viewModel.setIsDisplayingRecipientBottomSheet(true)
     RecipientBottomSheetDialogFragment
-      .create(senderId, null)
-      .show(childFragmentManager, "BOTTOM")
+      .show(childFragmentManager, senderId, null)
   }
 
   private fun presentBottomBar(post: StoryPost, replyState: StoryViewerPageState.ReplyState, isReceiptsEnabled: Boolean) {
@@ -1292,25 +1291,21 @@ class StoryViewerPageFragment :
   }
 
   private class FallbackPhotoProvider : Recipient.FallbackPhotoProvider() {
-    override fun getPhotoForGroup(): FallbackContactPhoto {
-      return FallbackPhoto20dp(R.drawable.symbol_group_20)
-    }
+    override val photoForGroup: FallbackContactPhoto
+      get() = FallbackPhoto20dp(R.drawable.symbol_group_20)
 
-    override fun getPhotoForResolvingRecipient(): FallbackContactPhoto {
-      throw UnsupportedOperationException("This provider does not support resolving recipients")
-    }
+    override val photoForResolvingRecipient: FallbackContactPhoto
+      get() = throw UnsupportedOperationException("This provider does not support resolving recipients")
 
-    override fun getPhotoForLocalNumber(): FallbackContactPhoto {
-      throw UnsupportedOperationException("This provider does not support local number")
-    }
+    override val photoForLocalNumber: FallbackContactPhoto
+      get() = throw UnsupportedOperationException("This provider does not support local number")
 
     override fun getPhotoForRecipientWithName(name: String, targetSize: Int): FallbackContactPhoto {
       return FixedSizeGeneratedContactPhoto(name, R.drawable.symbol_person_20)
     }
 
-    override fun getPhotoForRecipientWithoutName(): FallbackContactPhoto {
-      return FallbackPhoto20dp(R.drawable.symbol_person_20)
-    }
+    override val photoForRecipientWithoutName: FallbackContactPhoto
+      get() = FallbackPhoto20dp(R.drawable.symbol_person_20)
   }
 
   private class FixedSizeGeneratedContactPhoto(name: String, fallbackResId: Int) : GeneratedContactPhoto(name, fallbackResId) {

@@ -66,6 +66,9 @@ import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.ConversationLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
+import com.google.android.material.datepicker.CalendarConstraints
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.BaseTransientBottomBar.Duration
 import com.google.android.material.snackbar.Snackbar
@@ -83,6 +86,7 @@ import org.signal.core.util.PendingIntentFlags
 import org.signal.core.util.Result
 import org.signal.core.util.ThreadUtil
 import org.signal.core.util.concurrent.LifecycleDisposable
+import org.signal.core.util.concurrent.ListenableFuture
 import org.signal.core.util.concurrent.addTo
 import org.signal.core.util.dp
 import org.signal.core.util.logging.Log
@@ -242,11 +246,9 @@ import org.thoughtcrime.securesms.mediasend.Media
 import org.thoughtcrime.securesms.mediasend.MediaSendActivityResult
 import org.thoughtcrime.securesms.messagedetails.MessageDetailsFragment
 import org.thoughtcrime.securesms.messagerequests.MessageRequestRepository
-import org.thoughtcrime.securesms.messagerequests.MessageRequestState
 import org.thoughtcrime.securesms.mms.AttachmentManager
 import org.thoughtcrime.securesms.mms.AudioSlide
 import org.thoughtcrime.securesms.mms.GifSlide
-import org.thoughtcrime.securesms.mms.GlideApp
 import org.thoughtcrime.securesms.mms.ImageSlide
 import org.thoughtcrime.securesms.mms.MediaConstraints
 import org.thoughtcrime.securesms.mms.QuoteModel
@@ -258,6 +260,7 @@ import org.thoughtcrime.securesms.mms.VideoSlide
 import org.thoughtcrime.securesms.notifications.v2.ConversationId
 import org.thoughtcrime.securesms.payments.preferences.PaymentsActivity
 import org.thoughtcrime.securesms.permissions.Permissions
+import org.thoughtcrime.securesms.profiles.manage.EditProfileActivity
 import org.thoughtcrime.securesms.profiles.spoofing.ReviewCardDialogFragment
 import org.thoughtcrime.securesms.providers.BlobProvider
 import org.thoughtcrime.securesms.ratelimit.RecaptchaProofBottomSheetFragment
@@ -291,6 +294,7 @@ import org.thoughtcrime.securesms.util.Debouncer
 import org.thoughtcrime.securesms.util.DeleteDialog
 import org.thoughtcrime.securesms.util.Dialogs
 import org.thoughtcrime.securesms.util.DrawableUtil
+import org.thoughtcrime.securesms.util.FeatureFlags
 import org.thoughtcrime.securesms.util.FullscreenHelper
 import org.thoughtcrime.securesms.util.MediaUtil
 import org.thoughtcrime.securesms.util.MessageConstraintsUtil
@@ -303,7 +307,8 @@ import org.thoughtcrime.securesms.util.StorageUtil
 import org.thoughtcrime.securesms.util.TextSecurePreferences
 import org.thoughtcrime.securesms.util.ViewUtil
 import org.thoughtcrime.securesms.util.WindowUtil
-import org.thoughtcrime.securesms.util.concurrent.ListenableFuture
+import org.thoughtcrime.securesms.util.atMidnight
+import org.thoughtcrime.securesms.util.atUTC
 import org.thoughtcrime.securesms.util.createActivityViewModel
 import org.thoughtcrime.securesms.util.doAfterNextLayout
 import org.thoughtcrime.securesms.util.fragments.requireListener
@@ -312,13 +317,16 @@ import org.thoughtcrime.securesms.util.hasAudio
 import org.thoughtcrime.securesms.util.hasGiftBadge
 import org.thoughtcrime.securesms.util.hasNonTextSlide
 import org.thoughtcrime.securesms.util.isValidReactionTarget
+import org.thoughtcrime.securesms.util.padding
 import org.thoughtcrime.securesms.util.savedStateViewModel
+import org.thoughtcrime.securesms.util.toMillis
 import org.thoughtcrime.securesms.util.viewModel
 import org.thoughtcrime.securesms.util.views.Stub
 import org.thoughtcrime.securesms.util.visible
 import org.thoughtcrime.securesms.verify.VerifyIdentityActivity
 import org.thoughtcrime.securesms.wallpaper.ChatWallpaper
 import org.thoughtcrime.securesms.wallpaper.ChatWallpaperDimLevelUtil
+import java.time.LocalDateTime
 import java.util.Locale
 import java.util.Optional
 import java.util.concurrent.ExecutionException
@@ -400,7 +408,8 @@ class ConversationFragment :
       repository = ConversationRepository(localContext = requireContext(), isInBubble = args.conversationScreenType == ConversationScreenType.BUBBLE),
       recipientRepository = conversationRecipientRepository,
       messageRequestRepository = messageRequestRepository,
-      scheduledMessagesRepository = ScheduledMessagesRepository()
+      scheduledMessagesRepository = ScheduledMessagesRepository(),
+      initialChatColors = args.chatColors
     )
   }
 
@@ -590,7 +599,15 @@ class ConversationFragment :
 
     inputPanel.setMediaListener(InputPanelMediaListener())
 
-    ChatColorsDrawable.attach(binding.conversationItemRecycler)
+    binding.conversationItemRecycler.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+      viewModel.onChatBoundsChanged(Rect(left, top, right, bottom))
+    }
+
+    binding.toolbar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, _ ->
+      binding.conversationItemRecycler.padding(top = bottom)
+    }
+
+    binding.conversationItemRecycler.addItemDecoration(ChatColorsDrawable.ChatColorsItemDecoration)
   }
 
   override fun onViewStateRestored(savedInstanceState: Bundle?) {
@@ -1101,7 +1118,7 @@ class ConversationFragment :
         ConversationTypingIndicatorAdapter.State(
           typists = it.typists,
           isGroupThread = recipient.isGroup,
-          hasWallpaper = recipient.hasWallpaper(),
+          hasWallpaper = recipient.hasWallpaper,
           isReplacedByIncomingMessage = it.isReplacedByIncomingMessage
         )
       )
@@ -1119,7 +1136,7 @@ class ConversationFragment :
 
     binding.conversationTitleView.conversationTitleView.setOnStoryRingClickListener {
       val recipient: Recipient = viewModel.recipientSnapshot ?: return@setOnStoryRingClickListener
-      val args = StoryViewerArgs.Builder(recipient.id, recipient.shouldHideStory())
+      val args = StoryViewerArgs.Builder(recipient.id, recipient.shouldHideStory)
         .isFromQuote(true)
         .build()
 
@@ -1135,12 +1152,12 @@ class ConversationFragment :
     var inputDisabled = true
     when {
       inputReadyState.isClientExpired || inputReadyState.isUnauthorized -> disabledInputView.showAsExpiredOrUnauthorized(inputReadyState.isClientExpired, inputReadyState.isUnauthorized)
-      inputReadyState.messageRequestState != MessageRequestState.NONE && inputReadyState.messageRequestState != MessageRequestState.NONE_HIDDEN -> disabledInputView.showAsMessageRequest(inputReadyState.conversationRecipient, inputReadyState.messageRequestState)
+      !inputReadyState.messageRequestState.isAccepted -> disabledInputView.showAsMessageRequest(inputReadyState.conversationRecipient, inputReadyState.messageRequestState)
       inputReadyState.isActiveGroup == false -> disabledInputView.showAsNoLongerAMember()
       inputReadyState.isRequestingMember == true -> disabledInputView.showAsRequestingMember()
       inputReadyState.isAnnouncementGroup == true && inputReadyState.isAdmin == false -> disabledInputView.showAsAnnouncementGroupAdminsOnly()
       inputReadyState.conversationRecipient.isReleaseNotes -> disabledInputView.showAsReleaseNotesChannel(inputReadyState.conversationRecipient)
-      inputReadyState.shouldShowInviteToSignal() -> disabledInputView.showAsInviteToSignal(requireContext(), inputReadyState.conversationRecipient)
+      inputReadyState.shouldShowInviteToSignal() -> disabledInputView.showAsInviteToSignal(requireContext(), inputReadyState.conversationRecipient, inputReadyState.threadContainsSms)
       else -> inputDisabled = false
     }
 
@@ -1198,7 +1215,7 @@ class ConversationFragment :
       )
       conversationActivityResultContracts.launchMediaEditor(listOf(media), recipientId, composeText.textTrimmed)
     } else {
-      attachmentManager.setMedia(GlideApp.with(this), uri, mediaType, MediaConstraints.getPushMediaConstraints(), width, height)
+      attachmentManager.setMedia(Glide.with(this), uri, mediaType, MediaConstraints.getPushMediaConstraints(), width, height)
     }
   }
 
@@ -1294,7 +1311,7 @@ class ConversationFragment :
 
     val titleView = binding.conversationTitleView.root
 
-    titleView.setTitle(GlideApp.with(this), recipient)
+    titleView.setTitle(Glide.with(this), recipient)
     if (recipient.expiresInSeconds > 0) {
       titleView.showExpiring(recipient)
     } else {
@@ -1369,7 +1386,6 @@ class ConversationFragment :
       colorFilter = PorterDuffColorFilter(chatColors.asSingleColor(), PorterDuff.Mode.MULTIPLY)
       invalidateSelf()
     }
-    ChatColorsDrawable.setGlobalChatColors(binding.conversationItemRecycler, chatColors)
   }
 
   private fun presentScrollButtons(scrollButtonState: ConversationScrollButtonState) {
@@ -1439,7 +1455,7 @@ class ConversationFragment :
       is ShareOrDraftData.SetLocation -> attachmentManager.setLocation(data.location, MediaConstraints.getPushMediaConstraints())
       is ShareOrDraftData.SetEditMessage -> {
         composeText.setDraftText(data.draftText)
-        inputPanel.enterEditMessageMode(GlideApp.with(this), data.messageEdit, true)
+        inputPanel.enterEditMessageMode(Glide.with(this), data.messageEdit, true)
       }
 
       is ShareOrDraftData.SetMedia -> {
@@ -1527,14 +1543,16 @@ class ConversationFragment :
 
     adapter = ConversationAdapterV2(
       lifecycleOwner = viewLifecycleOwner,
-      glideRequests = GlideApp.with(this),
+      requestManager = Glide.with(this),
       clickListener = ConversationItemClickListener(),
       hasWallpaper = args.wallpaper != null,
       colorizer = colorizer,
-      startExpirationTimeout = viewModel::startExpirationTimeout
+      startExpirationTimeout = viewModel::startExpirationTimeout,
+      chatColorsDataProvider = viewModel::chatColorsSnapshot,
+      displayDialogFragment = { it.show(childFragmentManager, null) }
     )
 
-    typingIndicatorAdapter = ConversationTypingIndicatorAdapter(GlideApp.with(this))
+    typingIndicatorAdapter = ConversationTypingIndicatorAdapter(Glide.with(this))
 
     scrollToPositionDelegate = ScrollToPositionDelegate(
       recyclerView = binding.conversationItemRecycler,
@@ -1609,7 +1627,7 @@ class ConversationFragment :
       if (result.results.isNotEmpty()) {
         val messageResult = result.results[result.position]
         disposables += viewModel
-          .moveToSearchResult(messageResult)
+          .moveToDate(messageResult.receivedTimestampMs)
           .observeOn(AndroidSchedulers.mainThread())
           .subscribeBy {
             moveToPosition(it)
@@ -1635,7 +1653,7 @@ class ConversationFragment :
         } else if (state.hasLinks() && !state.linkPreview.isPresent) {
           inputPanel.setLinkPreviewNoPreview(state.error)
         } else {
-          inputPanel.setLinkPreview(GlideApp.with(this), state.linkPreview)
+          inputPanel.setLinkPreview(Glide.with(this), state.linkPreview)
         }
 
         updateToggleButtonState()
@@ -1653,7 +1671,7 @@ class ConversationFragment :
     val keyboardPage = when (keyboardMode) {
       TextSecurePreferences.MediaKeyboardMode.EMOJI -> if (isSystemEmojiPreferred) KeyboardPage.STICKER else KeyboardPage.EMOJI
       TextSecurePreferences.MediaKeyboardMode.STICKER -> KeyboardPage.STICKER
-      TextSecurePreferences.MediaKeyboardMode.GIF -> KeyboardPage.GIF
+      TextSecurePreferences.MediaKeyboardMode.GIF -> if (FeatureFlags.gifSearchAvailable()) KeyboardPage.GIF else KeyboardPage.STICKER
     }
 
     inputPanel.setMediaKeyboardToggleMode(keyboardPage)
@@ -1848,7 +1866,7 @@ class ConversationFragment :
           composeTextEventsListener?.typingStatusEnabled = false
           composeText.setText("")
           composeTextEventsListener?.typingStatusEnabled = true
-          attachmentManager.clear(GlideApp.with(this@ConversationFragment), false)
+          attachmentManager.clear(Glide.with(this@ConversationFragment), false)
           inputPanel.clearQuote()
         }
         scrollToPositionDelegate.markListCommittedVersion()
@@ -1883,7 +1901,7 @@ class ConversationFragment :
   private fun handleRecentSafetyNumberChange(changedRecords: List<IdentityRecord>) {
     val recipient = viewModel.recipientSnapshot ?: return
     SafetyNumberBottomSheet
-      .forIdentityRecordsAndDestination(changedRecords, RecipientSearchKey(recipient.getId(), false))
+      .forIdentityRecordsAndDestination(changedRecords, RecipientSearchKey(recipient.id, false))
       .show(childFragmentManager)
   }
 
@@ -2093,6 +2111,128 @@ class ConversationFragment :
     composeText.clearFocus()
   }
 
+  //region Message Request Helpers
+
+  @SuppressLint("CheckResult")
+  private fun onReportSpam() {
+    val recipient = viewModel.recipientSnapshot
+    if (recipient == null) {
+      Log.w(TAG, "[onBlockClicked] No recipient!")
+      return
+    }
+
+    BlockUnblockDialog.showReportSpamFor(
+      requireContext(),
+      lifecycle,
+      recipient,
+      {
+        messageRequestViewModel
+          .onReportSpam()
+          .doOnSubscribe { binding.conversationDisabledInput.showBusy() }
+          .doOnTerminate { binding.conversationDisabledInput.hideBusy() }
+          .subscribeBy {
+            Log.d(TAG, "report spam complete")
+            toast(R.string.ConversationFragment_reported_as_spam)
+          }
+      },
+      if (recipient.isBlocked) {
+        null
+      } else {
+        Runnable {
+          messageRequestViewModel
+            .onBlockAndReportSpam()
+            .doOnSubscribe { binding.conversationDisabledInput.showBusy() }
+            .doOnTerminate { binding.conversationDisabledInput.hideBusy() }
+            .subscribeBy { result ->
+              when (result) {
+                is Result.Success -> {
+                  Log.d(TAG, "report spam complete")
+                  toast(R.string.ConversationFragment_reported_as_spam_and_blocked)
+                }
+                is Result.Failure -> {
+                  Log.d(TAG, "report spam failed ${result.failure}")
+                  toast(GroupErrors.getUserDisplayMessage(result.failure))
+                }
+              }
+            }
+        }
+      }
+    )
+  }
+
+  @SuppressLint("CheckResult")
+  private fun onBlock() {
+    val recipient = viewModel.recipientSnapshot
+    if (recipient == null) {
+      Log.w(TAG, "[onBlockClicked] No recipient!")
+      return
+    }
+
+    BlockUnblockDialog.showBlockFor(
+      requireContext(),
+      lifecycle,
+      recipient
+    ) {
+      messageRequestViewModel
+        .onBlock()
+        .subscribeWithShowProgress("block")
+    }
+  }
+
+  @SuppressLint("CheckResult")
+  private fun onUnblock() {
+    val recipient = viewModel.recipientSnapshot
+    if (recipient == null) {
+      Log.w(TAG, "[onUnblockClicked] No recipient!")
+      return
+    }
+
+    BlockUnblockDialog.showUnblockFor(
+      requireContext(),
+      lifecycle,
+      recipient
+    ) {
+      messageRequestViewModel
+        .onUnblock()
+        .subscribeWithShowProgress("unblock")
+    }
+  }
+
+  private fun onMessageRequestAccept() {
+    messageRequestViewModel
+      .onAccept()
+      .subscribeWithShowProgress("accept message request")
+      .addTo(disposables)
+  }
+
+  private fun onDeleteConversation() {
+    val recipient = viewModel.recipientSnapshot
+    if (recipient == null) {
+      Log.w(TAG, "[onDeleteConversation] No recipient!")
+      return
+    }
+
+    ConversationDialogs.displayDeleteDialog(requireContext(), recipient) {
+      messageRequestViewModel
+        .onDelete()
+        .subscribeWithShowProgress("delete message request")
+    }
+  }
+
+  private fun Single<Result<Unit, GroupChangeFailureReason>>.subscribeWithShowProgress(logMessage: String): Disposable {
+    return doOnSubscribe { binding.conversationDisabledInput.showBusy() }
+      .doOnTerminate { binding.conversationDisabledInput.hideBusy() }
+      .subscribeBy { result ->
+        when (result) {
+          is Result.Success -> Log.d(TAG, "$logMessage complete")
+          is Result.Failure -> {
+            Log.d(TAG, "$logMessage failed ${result.failure}")
+            toast(GroupErrors.getUserDisplayMessage(result.failure))
+          }
+        }
+      }
+  }
+
   private inner class BackPressedDelegate : OnBackPressedCallback(true) {
     override fun handleOnBackPressed() {
       Log.d(TAG, "onBackPressed()")
@@ -2109,6 +2249,8 @@ class ConversationFragment :
     }
   }
 
+  // endregion
+
   //region Message action handling
 
   private fun handleReplyToMessage(conversationMessage: ConversationMessage) {
@@ -2124,7 +2266,7 @@ class ConversationFragment :
     val author = conversationMessage.messageRecord.fromRecipient
 
     inputPanel.setQuote(
-      GlideApp.with(this),
+      Glide.with(this),
       conversationMessage.messageRecord.dateSent,
       author,
       body,
@@ -2142,7 +2284,7 @@ class ConversationFragment :
 
     viewModel.resolveMessageToEdit(conversationMessage)
       .subscribeBy { updatedMessage ->
-        inputPanel.enterEditMessageMode(GlideApp.with(this), updatedMessage, false)
+        inputPanel.enterEditMessageMode(Glide.with(this), updatedMessage, false)
       }
       .addTo(disposables)
   }
@@ -2326,6 +2468,16 @@ class ConversationFragment :
     return isScrolledToBottom() || layoutManager.findFirstVisibleItemPosition() <= 0
   }
 
+  private fun closeChatSearch() {
+    isSearchRequested = false
+    searchViewModel.onSearchClosed()
+    searchNav.visible = false
+    inputPanel.setHideForSearch(false)
+    viewModel.setSearchQuery(null)
+    binding.conversationDisabledInput.visible = true
+    invalidateOptionsMenu()
+  }
+
   /**
    * Controls animation and visibility of the scrollDateHeader.
    */
@@ -2477,7 +2629,7 @@ class ConversationFragment :
         startActivity(
           StoryViewerActivity.createIntent(
             requireContext(),
-            StoryViewerArgs.Builder(quote.author, Recipient.resolved(quote.author).shouldHideStory())
+            StoryViewerArgs.Builder(quote.author, Recipient.resolved(quote.author).shouldHideStory)
               .withStoryId(parentStoryId.asMessageId().id)
               .isFromQuote(true)
               .build()
@@ -2596,7 +2748,7 @@ class ConversationFragment :
 
     override fun onGroupMemberClicked(recipientId: RecipientId, groupId: GroupId) {
       context ?: return
-      RecipientBottomSheetDialogFragment.create(recipientId, groupId).show(childFragmentManager, BottomSheetUtil.STANDARD_BOTTOM_SHEET_FRAGMENT_TAG)
+      RecipientBottomSheetDialogFragment.show(childFragmentManager, recipientId, groupId)
     }
 
     override fun onMessageWithErrorClicked(messageRecord: MessageRecord) {
@@ -2707,6 +2859,8 @@ class ConversationFragment :
     override fun onCallToAction(action: String) {
       if ("gift_badge" == action) {
         startActivity(Intent(requireContext(), GiftFlowActivity::class.java))
+      } else if ("username_edit" == action) {
+        startActivity(EditProfileActivity.getIntentForUsernameEdit(requireContext()))
       }
     }
 
@@ -2729,19 +2883,17 @@ class ConversationFragment :
     override fun onRecipientNameClicked(target: RecipientId) {
       context ?: return
       disposables += viewModel.recipient.firstOrError().observeOn(AndroidSchedulers.mainThread()).subscribeBy {
-        RecipientBottomSheetDialogFragment.create(
+        RecipientBottomSheetDialogFragment.show(
+          parentFragmentManager,
           target,
           it.groupId.orElse(null)
-        ).show(parentFragmentManager, BottomSheetUtil.STANDARD_BOTTOM_SHEET_FRAGMENT_TAG)
+        )
       }
     }
 
     override fun onInviteToSignalClicked() {
-      val recipient = viewModel.recipientSnapshot ?: return
       InviteActions.inviteUserToSignal(
         requireContext(),
-        recipient,
-        binding.conversationInputPanel.embeddedTextEditor::appendInvite,
         this@ConversationFragment::startActivity
       )
     }
@@ -2977,6 +3129,31 @@ class ConversationFragment :
       CommunicationActions.startVideoCall(this@ConversationFragment, callLinkRootKey)
     }
 
+    override fun onShowSafetyTips(forGroup: Boolean) {
+      SafetyTipsBottomSheetDialog.show(childFragmentManager, forGroup)
+    }
+
+    override fun onReportSpamLearnMoreClicked() {
+      MaterialAlertDialogBuilder(requireContext())
+        .setTitle(R.string.ConversationFragment_reported_spam)
+        .setMessage(R.string.ConversationFragment_reported_spam_message)
+        .setPositiveButton(android.R.string.ok, null)
+        .show()
+    }
+
+    override fun onMessageRequestAcceptOptionsClicked() {
+      val recipient: Recipient? = viewModel.recipientSnapshot
+
+      if (recipient != null) {
+        MaterialAlertDialogBuilder(requireContext())
+          .setMessage(getString(R.string.ConversationFragment_you_accepted_a_message_request_from_s, recipient.getDisplayName(requireContext())))
+          .setPositiveButton(R.string.ConversationFragment_block) { _, _ -> onBlock() }
+          .setNegativeButton(R.string.ConversationFragment_report_spam) { _, _ -> onReportSpam() }
+          .setNeutralButton(R.string.ConversationFragment__cancel, null)
+          .show()
+      }
+    }
+
     private fun MessageRecord.getAudioUriForLongClick(): Uri? {
       val playbackState = getVoiceNoteMediaController().voiceNotePlaybackState.value
       if (playbackState == null || !playbackState.isPlaying) {
@@ -3006,7 +3183,7 @@ class ConversationFragment :
         hasActiveGroupCall = groupCallViewModel.hasOngoingGroupCallSnapshot,
         distributionType = args.distributionType,
         threadId = args.threadId,
-        isInMessageRequest = viewModel.hasMessageRequestState,
+        messageRequestState = viewModel.messageRequestState,
         isInBubble = args.conversationScreenType.isInBubble
       )
     }
@@ -3043,6 +3220,8 @@ class ConversationFragment :
           searchNav.visible = true
           searchNav.setData(0, 0)
           inputPanel.setHideForSearch(true)
+          viewModel.onChatSearchOpened()
+          binding.conversationDisabledInput.visible = false
 
           (0 until menu.size()).forEach {
             if (menu.getItem(it) != searchMenuItem) {
@@ -3055,12 +3234,7 @@ class ConversationFragment :
 
         override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
           searchView.setOnQueryTextListener(null)
-          isSearchRequested = false
-          searchViewModel.onSearchClosed()
-          searchNav.visible = false
-          inputPanel.setHideForSearch(false)
-          viewModel.setSearchQuery(null)
-          invalidateOptionsMenu()
+          closeChatSearch()
           return true
         }
       })
@@ -3089,14 +3263,9 @@ class ConversationFragment :
       this@ConversationFragment.handleVideoCall()
     }
 
-    override fun handleDial(isSecure: Boolean) {
+    override fun handleDial() {
       val recipient: Recipient = viewModel.recipientSnapshot ?: return
-
-      if (isSecure) {
-        CommunicationActions.startVoiceCall(this@ConversationFragment, recipient)
-      } else {
-        CommunicationActions.startInsecureCall(this@ConversationFragment, recipient)
-      }
+      CommunicationActions.startVoiceCall(this@ConversationFragment, recipient)
     }
 
     override fun handleViewMedia() {
@@ -3120,7 +3289,7 @@ class ConversationFragment :
         requireActivity().registerReceiver(pinnedShortcutReceiver, IntentFilter(ACTION_PINNED_SHORTCUT))
       }
 
-      viewModel.getContactPhotoIcon(requireContext(), GlideApp.with(this@ConversationFragment))
+      viewModel.getContactPhotoIcon(requireContext(), Glide.with(this@ConversationFragment))
         .subscribe { infoCompat ->
           val intent = Intent(ACTION_PINNED_SHORTCUT)
           val callback = PendingIntent.getBroadcast(requireContext(), 902, intent, PendingIntentFlags.mutable())
@@ -3178,8 +3347,6 @@ class ConversationFragment :
 
       InviteActions.inviteUserToSignal(
         context = requireContext(),
-        recipient = recipient,
-        appendInviteToComposer = composeText::appendInvite,
         launchIntent = this@ConversationFragment::startActivity
       )
     }
@@ -3238,6 +3405,26 @@ class ConversationFragment :
 
     override fun handleFormatText(id: Int) {
       composeText.handleFormatText(id)
+    }
+
+    override fun handleBlock() {
+      onBlock()
+    }
+
+    override fun handleUnblock() {
+      onUnblock()
+    }
+
+    override fun handleReportSpam() {
+      onReportSpam()
+    }
+
+    override fun handleMessageRequestAccept() {
+      onMessageRequestAccept()
+    }
+
+    override fun handleDeleteConversation() {
+      onDeleteConversation()
     }
   }
 
@@ -3495,7 +3682,7 @@ class ConversationFragment :
           .toTypedArray()
 
         MaterialAlertDialogBuilder(requireContext())
-          .setIcon(R.drawable.ic_warning)
+          .setIcon(R.drawable.symbol_error_triangle_fill_24)
           .setTitle(R.string.ConversationFragment__no_longer_verified)
           .setItems(unverifiedNames) { _, which: Int -> VerifyIdentityActivity.startOrShowExchangeMessagesDialog(requireContext(), unverifiedIdentities[which], false) }
           .show()
@@ -3550,93 +3737,34 @@ class ConversationFragment :
     }
 
     override fun onAcceptMessageRequestClicked() {
-      messageRequestViewModel
-        .onAccept()
-        .subscribeWithShowProgress("accept message request")
-        .addTo(disposables)
+      onMessageRequestAccept()
     }
 
-    override fun onDeleteGroupClicked() {
-      val recipient = viewModel.recipientSnapshot
-      if (recipient == null) {
-        Log.w(TAG, "[onDeleteGroupClicked] No recipient!")
-        return
-      }
-
-      ConversationDialogs.displayDeleteDialog(requireContext(), recipient) {
-        messageRequestViewModel
-          .onDelete()
-          .subscribeWithShowProgress("delete message request")
-      }
+    override fun onDeleteClicked() {
+      onDeleteConversation()
     }
 
     override fun onBlockClicked() {
-      val recipient = viewModel.recipientSnapshot
-      if (recipient == null) {
-        Log.w(TAG, "[onBlockClicked] No recipient!")
-        return
-      }
-
-      BlockUnblockDialog.showBlockAndReportSpamFor(
-        requireContext(),
-        lifecycle,
-        recipient,
-        {
-          messageRequestViewModel
-            .onBlock()
-            .subscribeWithShowProgress("block")
-        },
-        {
-          messageRequestViewModel
-            .onBlockAndReportSpam()
-            .subscribeWithShowProgress("block")
-        }
-      )
+      onBlock()
     }
 
     override fun onUnblockClicked() {
-      val recipient = viewModel.recipientSnapshot
-      if (recipient == null) {
-        Log.w(TAG, "[onUnblockClicked] No recipient!")
-        return
-      }
+      onUnblock()
+    }
 
-      BlockUnblockDialog.showUnblockFor(
-        requireContext(),
-        lifecycle,
-        recipient
-      ) {
-        messageRequestViewModel
-          .onUnblock()
-          .subscribeWithShowProgress("unblock")
-      }
+    override fun onReportSpamClicked() {
+      onReportSpam()
     }
 
     override fun onInviteToSignal(recipient: Recipient) {
       InviteActions.inviteUserToSignal(
         context = requireContext(),
-        recipient = recipient,
-        appendInviteToComposer = null,
         launchIntent = this@ConversationFragment::startActivity
       )
     }
 
     override fun onUnmuteReleaseNotesChannel() {
       viewModel.muteConversation(0L)
-    }
-
-    private fun Single<Result<Unit, GroupChangeFailureReason>>.subscribeWithShowProgress(logMessage: String): Disposable {
-      return doOnSubscribe { binding.conversationDisabledInput.showBusy() }
-        .doOnTerminate { binding.conversationDisabledInput.hideBusy() }
-        .subscribeBy { result ->
-          when (result) {
-            is Result.Success -> Log.d(TAG, "$logMessage complete")
-            is Result.Failure -> {
-              Log.d(TAG, "$logMessage failed ${result.failure}")
-              toast(GroupErrors.getUserDisplayMessage(result.failure))
-            }
-          }
-        }
     }
   }
 
@@ -4040,6 +4168,47 @@ class ConversationFragment :
 
     override fun onSearchMoveDownPressed() {
       searchViewModel.onMoveDown()
+    }
+
+    override fun onDatePickerSelected() {
+      disposables += viewModel.getEarliestMessageDate().subscribe { earliestDate ->
+        val local = LocalDateTime.now()
+          .atMidnight()
+          .atUTC()
+          .toMillis()
+        val datePicker =
+          MaterialDatePicker.Builder
+            .datePicker()
+            .setTitleText(getString(R.string.ScheduleMessageTimePickerBottomSheet__select_date_title))
+            .setSelection(local)
+            .setCalendarConstraints(
+              CalendarConstraints.Builder()
+                .setValidator(viewModel.jumpToDateValidator)
+                .setStart(earliestDate)
+                .setEnd(local)
+                .build()
+            )
+            .build()
+
+        datePicker.addOnDismissListener {
+          datePicker.clearOnDismissListeners()
+          datePicker.clearOnPositiveButtonClickListeners()
+        }
+
+        datePicker.addOnPositiveButtonClickListener { selectedDate ->
+          if (selectedDate != null) {
+            disposables += viewModel
+              .moveToDate(selectedDate)
+              .observeOn(AndroidSchedulers.mainThread())
+              .subscribeBy { position ->
+                moveToPosition(position - 1)
+                closeChatSearch()
+              }
+          }
+        }
+
+        datePicker.show(childFragmentManager, "DATE_PICKER")
+      }
     }
   }
 
