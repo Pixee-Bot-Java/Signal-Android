@@ -38,6 +38,7 @@ import org.thoughtcrime.securesms.keyvalue.SignalStore;
 import org.thoughtcrime.securesms.profiles.AvatarHelper;
 import org.thoughtcrime.securesms.recipients.RecipientId;
 import org.thoughtcrime.securesms.util.BackupUtil;
+import org.thoughtcrime.securesms.util.FeatureFlags;
 import org.thoughtcrime.securesms.util.Util;
 
 import java.io.ByteArrayOutputStream;
@@ -269,6 +270,13 @@ public class FullBackupImporter extends FullBackupBase {
     if (keyValue.key == null) {
       Log.w(TAG, "Null preference key!");
       return;
+    }
+
+    if (FeatureFlags.registrationV2()) {
+      if (SignalStore.account().getKeysToIncludeInBackup().contains(keyValue.key)) {
+        Log.i(TAG, "[regv2] skipping restore of " + keyValue.key);
+        return;
+      }
     }
 
     if (keyValue.blobValue != null) {
